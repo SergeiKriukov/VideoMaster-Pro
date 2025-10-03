@@ -64,6 +64,8 @@
 ```bash
 brew install ffmpeg
 ```
+<img width="1012" height="750" alt="image" src="https://github.com/user-attachments/assets/ba16eec4-a7c4-43bb-ab84-9cdd5c2b7450" />
+
 
 ## 📦 Установка
 
