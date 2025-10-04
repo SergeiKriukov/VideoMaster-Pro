@@ -18,31 +18,21 @@ final class FFmpegService {
     func checkFFmpegInstallation() -> Bool {
         logger.log("Проверка установки FFmpeg", level: .info)
 
-        let possiblePaths = ["/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        // Check common installation locations for FFmpeg
+        // Since we're in sandbox, we can't use 'which' command, so check known paths directly
+        let possiblePaths = [
+            "/usr/local/bin/ffmpeg",
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "/opt/local/bin/ffmpeg", // MacPorts
+            "/sw/bin/ffmpeg" // Fink
+        ]
 
         for path in possiblePaths {
             logger.log("Проверка пути: \(path)", level: .debug)
 
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: path)
-            process.arguments = ["-version"]
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                if process.terminationStatus == 0 {
-                    logger.log("FFmpeg найден по пути: \(path)", level: .info)
-                    return true
-                } else {
-                    logger.log("FFmpeg по пути \(path) вернул код выхода: \(process.terminationStatus)", level: .warning)
-                }
-            } catch {
-                logger.log("Ошибка при проверке FFmpeg по пути \(path): \(error.localizedDescription)", level: .warning)
+            if verifyFFmpegExecutable(at: path) {
+                return true
             }
         }
 
@@ -50,33 +40,39 @@ final class FFmpegService {
         return false
     }
 
-    func getFFmpegPath() -> String? {
-        // First try to use 'which' command to find ffmpeg
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = ["ffmpeg"]
+    private func verifyFFmpegExecutable(at path: String) -> Bool {
+        // In sandbox, we can't execute external processes, so just check if file exists and is executable
+        let fileManager = FileManager.default
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        // Check if file exists
+        guard fileManager.fileExists(atPath: path) else {
+            logger.log("FFmpeg файл не найден по пути: \(path)", level: .debug)
+            return false
+        }
 
+        // Check if file is executable
         do {
-            try process.run()
-            process.waitUntilExit()
-
-            if process.terminationStatus == 0 {
-                let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !output.isEmpty {
-                    logger.log("FFmpeg найден через 'which': \(output)", level: .info)
-                    return output
+            let attributes = try fileManager.attributesOfItem(atPath: path)
+            if let permissions = attributes[.posixPermissions] as? NSNumber {
+                let perms = permissions.uint16Value
+                // Check if owner has execute permission (0x49 = 73 = 0b001001001)
+                if (perms & 0o100) != 0 { // Owner execute bit
+                    logger.log("FFmpeg найден и является исполняемым по пути: \(path)", level: .info)
+                    return true
+                } else {
+                    logger.log("FFmpeg по пути \(path) не является исполняемым", level: .warning)
                 }
             }
         } catch {
-            logger.log("Ошибка выполнения 'which ffmpeg': \(error.localizedDescription)", level: .warning)
+            logger.log("Ошибка при проверке атрибутов FFmpeg по пути \(path): \(error.localizedDescription)", level: .warning)
         }
 
-        // Check common locations
+        return false
+    }
+
+    func getFFmpegPath() -> String? {
+        // Check common locations for FFmpeg
+        // Since we're in sandbox, we can't use 'which' command, so check known paths directly
         let possiblePaths = [
             "/usr/local/bin/ffmpeg",
             "/opt/homebrew/bin/ffmpeg",
@@ -116,6 +112,20 @@ final class FFmpegService {
 
         logger.log("Используем FFmpeg: \(ffmpegPath)", level: .info)
 
+        // Get input video dimensions for filter generation
+        let videoInfo = getVideoInfo(url: inputURL)
+        let inputWidth = videoInfo.resolution?.width ?? 1920
+        let inputHeight = videoInfo.resolution?.height ?? 1080
+
+        // Generate video filters if needed
+        var videoFilters: String? = nil
+        if settings.aspectRatioMode != .original {
+            videoFilters = settings.generateVideoFilters(inputWidth: Int(inputWidth), inputHeight: Int(inputHeight))
+            if let filters = videoFilters {
+                logger.log("Применяем видео фильтры: \(filters)", level: .info)
+            }
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ffmpegPath)
 
@@ -133,6 +143,12 @@ final class FFmpegService {
                 logger.log("Видео кодек: \(settings.videoCodec.rawValue), качество: \(Int(settings.videoQuality))", level: .info)
             } else {
                 logger.log("Видео кодек: \(settings.videoCodec.rawValue)", level: .info)
+            }
+
+            // Add video filters if needed
+            if let filters = videoFilters {
+                arguments.append("-vf")
+                arguments.append(filters)
             }
         } else {
             arguments.append("-c:v")
@@ -160,7 +176,7 @@ final class FFmpegService {
 
         // Output format
         arguments.append("-f")
-        arguments.append(settings.outputFormat.rawValue.lowercased())
+        arguments.append(settings.outputFormat.ffmpegFormat)
 
         // Output file
         arguments.append(outputURL.path)
@@ -191,10 +207,22 @@ final class FFmpegService {
             logger.log("Запускаем FFmpeg процесс", level: .info)
             try process.run()
 
+            // Set up timeout timer (30 minutes)
+            var timeoutTimer: Timer?
+            timeoutTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: false) { [self] _ in
+                if process.isRunning {
+                    self.logger.log("FFmpeg процесс превысил время ожидания (30 минут), принудительно завершаем", level: .warning)
+                    process.terminate()
+                }
+            }
+
             // Monitor progress in background
             DispatchQueue.global(qos: .background).async {
                 self.logger.log("Ожидаем завершения FFmpeg процесса", level: .debug)
                 process.waitUntilExit()
+
+                // Invalidate timeout timer
+                timeoutTimer?.invalidate()
 
                 // Clean up progress observer
                 if let observer = progressObserver {
@@ -316,14 +344,16 @@ final class FFmpegService {
                     codec = String(line[streamRange]).replacingOccurrences(of: "Video: ", with: "")
                 }
 
-                // Resolution
-                if line.contains(", ") && line.contains("x"), let resRange = line.range(of: "([0-9]+x[0-9]+)", options: .regularExpression) {
-                    let resString = String(line[resRange])
+                // Resolution - more specific pattern to avoid matching [0x1] etc.
+                if line.contains("Video:") && line.contains("x"), let resRange = line.range(of: ", ([0-9]+x[0-9]+)", options: .regularExpression) {
+                    let resString = String(line[resRange]).replacingOccurrences(of: ", ", with: "")
                     let components = resString.components(separatedBy: "x")
                     if components.count == 2,
                        let width = Double(components[0]),
-                       let height = Double(components[1]) {
+                       let height = Double(components[1]),
+                       width > 0, height > 0 { // Ensure valid dimensions
                         resolution = CGSize(width: width, height: height)
+                        print("DEBUG: FFmpeg parsed resolution = \(resolution!) from line: \(line)")
                     }
                 }
 

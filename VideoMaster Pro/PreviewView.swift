@@ -23,11 +23,11 @@ struct PreviewView: View {
         HStack(spacing: 0) {
             // Список файлов слева
             VStack(spacing: 0) {
-                Text("Видеофайлы")
-                    .font(.headline)
-                    .padding()
-
-                Divider()
+//                Text("Видеофайлы")
+//                    .font(.headline)
+//                    .padding()
+//
+//                Divider()
 
                 if viewModel.videoFiles.isEmpty {
                     VStack {
@@ -65,35 +65,36 @@ struct PreviewView: View {
                 if let file = selectedFile {
                     // Видеоплеер
                     VideoPlayerView(url: file.url, isPlaying: $isPlaying)
-                        .padding()
+                        .padding(.horizontal)
+                        .padding(.top)
 
                     // Кнопки управления воспроизведением
-                    HStack(spacing: 20) {
+                    HStack(spacing: 12) {
                         Button(action: {
                             isPlaying.toggle()
                         }) {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                                .font(.title2)
+                          //      .font(.title2)
                         }
                         .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                 //       .controlSize(.large)
 
                         Button(action: {
                             isPlaying = false
                         }) {
                             Image(systemName: "stop.fill")
-                                .font(.title2)
+                        //        .font(.title2)
                         }
                         .buttonStyle(.bordered)
-                        .controlSize(.large)
+                        //     .controlSize(.large)
                     }
-                    .padding(.horizontal)
+                    .padding(8)
 
                     Divider()
 
                     // Информация о файле
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("Информация о файле")
                                 .font(.title3)
                                 .fontWeight(.bold)
@@ -174,7 +175,7 @@ struct FilePreviewRow: View {
                 if let thumbnail = file.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: .fit)
                         .frame(width: 60, height: 34)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 } else {

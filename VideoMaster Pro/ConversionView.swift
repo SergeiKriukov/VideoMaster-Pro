@@ -173,7 +173,7 @@ struct VideoFileRow: View {
                 if let thumbnail = file.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: .fit)
                         .frame(width: 80, height: 45)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {

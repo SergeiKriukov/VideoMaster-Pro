@@ -34,13 +34,6 @@ struct MainView: View {
                     Label("Настройки", systemImage: "gear")
                 }
                 .tag(2)
-
-            // Вкладка Логи
-            LogsView()
-                .tabItem {
-                    Label("Логи", systemImage: "doc.text")
-                }
-                .tag(3)
         }
         .frame(minWidth: 800, minHeight: 600)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
@@ -56,16 +49,29 @@ struct MainView: View {
     }
 
     private func handleFileDrop(providers: [NSItemProvider]) -> Bool {
+        let lock = NSLock()
+        var urls: [URL] = []
+        var completedCount = 0
+
         for provider in providers {
             provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { (urlData, error) in
+                lock.lock()
                 if let urlData = urlData as? Data,
                    let url = URL(dataRepresentation: urlData, relativeTo: nil) {
+                    urls.append(url)
+                }
+                completedCount += 1
+
+                // When all providers are processed, add files
+                if completedCount == providers.count && !urls.isEmpty {
                     DispatchQueue.main.async {
-                        self.viewModel.addFiles([url])
+                        self.viewModel.addFiles(urls)
                     }
                 }
+                lock.unlock()
             }
         }
+
         return true
     }
 }

@@ -26,25 +26,34 @@ final class VideoConverterViewModel: ObservableObject {
     private var conversionQueue = DispatchQueue(label: "com.videomaster.conversion", qos: .userInitiated)
     private let logger = Logger.shared
 
+    // MARK: - Logs helpers for menu commands
+    func getLogFileURLForMenu() -> URL { logger.getLogFileURL() }
+    func getRecentLogsForMenu(lines: Int = 50) -> String { logger.getRecentLogs(lines: lines) }
+
     // MARK: - File Management
 
     func addFiles(_ urls: [URL]) {
         Task {
             for url in urls {
                 guard isVideoFile(url) else { continue }
-                
-                var videoFile = VideoFile(url: url)
-                await loadVideoInfo(for: &videoFile)
-                videoFiles.append(videoFile)
+
+                let videoFile = await loadVideoInfo(for: url)
+
+                // Update UI on main thread
+                await MainActor.run {
+                    videoFiles.append(videoFile)
+                }
             }
         }
     }
 
+    @MainActor
     func removeFile(at index: Int) {
         guard index < videoFiles.count else { return }
         videoFiles.remove(at: index)
     }
 
+    @MainActor
     func clearAllFiles() {
         videoFiles.removeAll()
     }
@@ -54,100 +63,109 @@ final class VideoConverterViewModel: ObservableObject {
         return videoExtensions.contains(url.pathExtension.lowercased())
     }
 
-    private func loadVideoInfo(for videoFile: inout VideoFile) async {
+    private func loadVideoInfo(for url: URL) async -> VideoFile {
+        var videoFile = VideoFile(url: url)
+
         // Load file size
         do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: videoFile.url.path)
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             videoFile.fileSize = attributes[.size] as? Int64
+
+            // Check if file is too small (less than 1KB) - might be corrupted
+            if let size = videoFile.fileSize, size < 1024 {
+                logger.log("Файл слишком маленький (\(size) байт), возможно поврежден: \(url.lastPathComponent)", level: .warning)
+                return videoFile
+            }
         } catch {
-            print("Error getting file size: \(error)")
+            logger.log("Ошибка получения размера файла: \(error.localizedDescription)", level: .error)
         }
 
-        // Try to get info from AVFoundation first (faster for supported formats)
-//        let asset = AVAsset(url: videoFile.url)
-//        let asset = AVURLAsset(url: videoFile.url)
-//        videoFile.duration = CMTimeGetSeconds(asset.duration)
-
+        // Try to get video info and generate thumbnail using AVFoundation
+        var avFoundationFailed = false
         do {
-            videoFile.duration = try await getVideoDuration(videoFile: videoFile.url)
-        } catch {
-            print("Error in getVideoDuration: \(error)")
-        }
-        
-//        if let videoTrack = asset.tracks(withMediaType: .video).first {
-//            videoFile.resolution = videoTrack.naturalSize
-//            videoFile.bitrate = Int(videoTrack.estimatedDataRate)
-//
-//            // Generate thumbnail
-//            let imageGenerator = AVAssetImageGenerator(asset: asset)
-//            imageGenerator.appliesPreferredTrackTransform = true
-//
-//            let time = CMTime(seconds: min(10, CMTimeGetSeconds(asset.duration) / 4), preferredTimescale: 600)
-//            do {
-//                let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
-//                videoFile.thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
-//            } catch {
-//                print("Error generating thumbnail with AVFoundation: \(error)")
-//                // Fallback to FFmpeg if needed
-//            }
-//        }
+            let asset = AVURLAsset(url: url)
 
-        @MainActor
-        func updateVideoInfo(for asset: AVAsset, videoFile: inout VideoFile) async {
-            do {
-                // Загружаем видео-треки
-                let videoTracks = try await asset.loadTracks(withMediaType: .video)
-                
-                if let videoTrack = videoTracks.first {
-                    // Загружаем свойства трека
-                    let naturalSize = try await videoTrack.load(.naturalSize)
-                    let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
-                    let duration = try await asset.load(.duration)
-                    
-                    // Обновляем свойства
-                    await MainActor.run {
-                        videoFile.resolution = naturalSize
-                        videoFile.bitrate = Int(estimatedDataRate)
-                    }
-                    
-                    // Генерируем thumbnail
-                    let imageGenerator = AVAssetImageGenerator(asset: asset)
-                    imageGenerator.appliesPreferredTrackTransform = true
-                    
-                    let time = CMTime(seconds: min(10, CMTimeGetSeconds(duration) / 4), preferredTimescale: 600)
-                    
-                    do {
-//                        let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
-                        let cgImage = try await imageGenerator.generateCGImage(at: time)
-                        await MainActor.run {
-                            videoFile.thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
-                        }
-                    } catch {
-                        print("Error generating thumbnail: \(error)")
-                    }
+            // Get duration if not already loaded
+            if videoFile.duration == nil {
+                let duration = try await asset.load(.duration)
+                videoFile.duration = CMTimeGetSeconds(duration)
+            }
+
+            // Load video tracks
+            let videoTracks = try await asset.loadTracks(withMediaType: .video)
+
+            if let videoTrack = videoTracks.first {
+                // Load video properties
+                let naturalSize = try await videoTrack.load(.naturalSize)
+                let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
+
+                print("DEBUG: AVFoundation naturalSize = \(naturalSize), estimatedDataRate = \(estimatedDataRate)")
+                videoFile.resolution = naturalSize
+                videoFile.bitrate = Int(estimatedDataRate)
+
+                // Generate thumbnail
+                let imageGenerator = AVAssetImageGenerator(asset: asset)
+                imageGenerator.appliesPreferredTrackTransform = true
+
+                // Calculate thumbnail size maintaining aspect ratio
+                let maxThumbnailSize: CGFloat = 200
+                let aspectRatio = naturalSize.width / naturalSize.height
+
+                var thumbnailSize: CGSize
+                if aspectRatio > 1 {
+                    // Landscape/horizontal video
+                    thumbnailSize = CGSize(width: maxThumbnailSize, height: maxThumbnailSize / aspectRatio)
+                } else {
+                    // Portrait/vertical video or square
+                    thumbnailSize = CGSize(width: maxThumbnailSize * aspectRatio, height: maxThumbnailSize)
                 }
-            } catch {
-                print("Error loading video info: \(error)")
+
+                // Ensure minimum size
+                thumbnailSize.width = max(thumbnailSize.width, 80)
+                thumbnailSize.height = max(thumbnailSize.height, 45)
+
+                imageGenerator.maximumSize = thumbnailSize
+
+                let duration = try await asset.load(.duration)
+                let time = CMTime(seconds: min(10, CMTimeGetSeconds(duration) / 4), preferredTimescale: 600)
+
+                do {
+                    // Use synchronous method for better compatibility
+                    let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+                    videoFile.thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: thumbnailSize.width, height: thumbnailSize.height))
+                } catch {
+                    logger.log("Ошибка генерации миниатюры с AVFoundation: \(error.localizedDescription)", level: .warning)
+                }
+            }
+        } catch {
+            avFoundationFailed = true
+            let errorMessage = error.localizedDescription
+            if errorMessage.contains("media format is not supported") ||
+               errorMessage.contains("Cannot Open") {
+                logger.log("AVFoundation не поддерживает формат файла, используем FFmpeg: \(url.lastPathComponent)", level: .info)
+            } else {
+                logger.log("Ошибка загрузки информации о видео с AVFoundation: \(errorMessage)", level: .warning)
             }
         }
-        
-        
-        
-        
-        // If AVFoundation failed to get some info, try FFmpeg
-        if videoFile.duration == nil || videoFile.resolution == nil {
+        // Always try to get additional info from FFmpeg (especially for unsupported formats)
+        // But only if we haven't already determined the file might be corrupted
+        if videoFile.fileSize == nil || (videoFile.fileSize ?? 0) >= 1024 {
             let ffmpegInfo = FFmpegService.shared.getVideoInfo(url: videoFile.url)
-            if videoFile.duration == nil {
+            if videoFile.duration == nil && ffmpegInfo.duration != nil {
                 videoFile.duration = ffmpegInfo.duration
             }
-            if videoFile.resolution == nil {
+            if videoFile.resolution == nil && ffmpegInfo.resolution != nil {
                 videoFile.resolution = ffmpegInfo.resolution
             }
-            if videoFile.bitrate == nil {
+            if videoFile.bitrate == nil && ffmpegInfo.bitrate != nil {
                 videoFile.bitrate = ffmpegInfo.bitrate
             }
-            videoFile.codec = ffmpegInfo.codec
+            if videoFile.codec == nil && ffmpegInfo.codec != nil {
+                videoFile.codec = ffmpegInfo.codec
+            }
         }
+
+        return videoFile
     }
 
     // MARK: - Conversion
@@ -201,6 +219,8 @@ final class VideoConverterViewModel: ObservableObject {
 
         let outputURL = generateOutputURL(for: file)
 
+        logger.log("Выходной файл: \(outputURL.path)", level: .info)
+
         let success = runFFmpeg(inputURL: file.url, outputURL: outputURL, settings: conversionSettings) { progress in
             DispatchQueue.main.async { [weak self] in
                 if var updatedFile = self?.videoFiles[index] {
@@ -233,7 +253,18 @@ final class VideoConverterViewModel: ObservableObject {
         fileName = fileName.replacingOccurrences(of: "{quality}", with: "\(Int(conversionSettings.videoQuality))")
 
         let fileExtension = conversionSettings.outputFormat.fileExtension
-        return outputDir.appendingPathComponent("\(fileName).\(fileExtension)")
+        var outputURL = outputDir.appendingPathComponent("\(fileName).\(fileExtension)")
+
+        // If file already exists, add a suffix
+        var counter = 1
+        let originalFileName = fileName
+        while FileManager.default.fileExists(atPath: outputURL.path) {
+            fileName = "\(originalFileName)_\(counter)"
+            outputURL = outputDir.appendingPathComponent("\(fileName).\(fileExtension)")
+            counter += 1
+        }
+
+        return outputURL
     }
 
     private func runFFmpeg(inputURL: URL, outputURL: URL, settings: ConversionSettings, progressHandler: @escaping (Double) -> Void) -> Bool {
@@ -268,7 +299,18 @@ final class VideoConverterViewModel: ObservableObject {
             semaphore.signal()
         }
 
-        semaphore.wait()
+        // Wait for completion with timeout (30 minutes max for video conversion)
+        let timeoutResult = semaphore.wait(timeout: .now() + 1800)
+
+        if timeoutResult == .timedOut {
+            logger.log("Таймаут конвертации файла \(inputURL.lastPathComponent) (30 минут)", level: .error)
+            DispatchQueue.main.async {
+                self.lastErrorMessage = "Превышено время ожидания конвертации (30 минут)"
+                self.showErrorAlert = true
+            }
+            return false
+        }
+
         return conversionSuccess
     }
 
@@ -286,58 +328,6 @@ final class VideoConverterViewModel: ObservableObject {
         lastErrorMessage = nil
         showErrorAlert = false
     }
-    
-    
-    private func getVideoDuration(videoFile: URL) async throws -> Double {
-        let asset = AVURLAsset(url: videoFile)
-        let duration = try await asset.load(.duration)
-        return CMTimeGetSeconds(duration)
-    }
-    
-    func generateThumbnailSimple(asset: AVAsset) async -> NSImage? {
-        do {
-            let duration = try await asset.load(.duration)
-            let imageGenerator = AVAssetImageGenerator(asset: asset)
-            imageGenerator.appliesPreferredTrackTransform = true
-    
-            let time = CMTime(seconds: min(10, CMTimeGetSeconds(duration) / 4), preferredTimescale: 600)
-            let cgImage = try await imageGenerator.generateCGImage(at: time)
-    
-            return NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
-        } catch {
-            print("Error: \(error)")
-            return nil
-        }
-    }
 
-    
-}
-
-
-
-
-extension AVAssetImageGenerator {
-    func generateCGImage(at time: CMTime) async throws -> CGImage {
-        return try await withCheckedThrowingContinuation { continuation in
-            self.generateCGImageAsynchronously(for: time) {
-                image,
-                actualTime,
-                error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else if let image = image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(
-                        throwing: NSError(
-                            domain: "AVFoundationError",
-                            code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "Failed to generate image"]
-                        )
-                    )
-                }
-            }
-        }
-    }
 }
 

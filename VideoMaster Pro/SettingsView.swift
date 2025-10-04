@@ -146,12 +146,10 @@ private struct VideoSettingsSection: View {
 
                 // Соотношение сторон
                 SettingRow(label: "Соотношение") {
-                    Picker("", selection: $viewModel.conversionSettings.aspectRatio) {
-                        Text("Авто").tag("Авто")
-                        Text("16:9").tag("16:9")
-                        Text("4:3").tag("4:3")
-                        Text("1:1").tag("1:1")
-                        Text("21:9").tag("21:9")
+                    Picker("", selection: $viewModel.conversionSettings.aspectRatioMode) {
+                        ForEach(AspectRatioMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
                     }
                     .frame(width: 150)
                 }
