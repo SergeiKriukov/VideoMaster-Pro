@@ -7,13 +7,13 @@
 
 import Foundation
 
-class Logger {
+final class Logger {
     static let shared = Logger()
 
     private let logFileURL: URL
     private let dateFormatter: DateFormatter
 
-    init() {
+    private init() {
         // Create logs directory in Documents
         let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let logsDir = documentsDir.appendingPathComponent("VideoMaster Pro Logs")
@@ -62,7 +62,7 @@ class Logger {
     }
 
     func getLogFileURL() -> URL {
-        return logFileURL
+        logFileURL
     }
 
     func getRecentLogs(lines: Int = 50) -> String {

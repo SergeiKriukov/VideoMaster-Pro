@@ -8,10 +8,11 @@
 import SwiftUI
 
 struct LogsView: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
     @State private var logsText: String = ""
     @State private var autoRefresh = true
     @State private var refreshTimer: Timer?
+    
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,8 +65,8 @@ struct LogsView: View {
         .onDisappear {
             stopAutoRefresh()
         }
-        .onChange(of: autoRefresh) { newValue in
-            if newValue {
+        .onChange(of: autoRefresh) { _, refresh in
+            if refresh {
                 startAutoRefresh()
             } else {
                 stopAutoRefresh()
@@ -103,5 +104,5 @@ struct LogsView: View {
 }
 
 #Preview {
-    LogsView(viewModel: VideoConverterViewModel())
+    LogsView()
 }

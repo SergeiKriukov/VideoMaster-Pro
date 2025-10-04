@@ -8,10 +8,10 @@
 import Foundation
 import Combine
 
-class FFmpegService {
+final class FFmpegService {
     static let shared = FFmpegService()
 
-    private let logger = Logger()
+    private let logger = Logger.shared
 
     private init() {}
 

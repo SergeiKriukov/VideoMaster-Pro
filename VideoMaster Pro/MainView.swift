@@ -8,35 +8,35 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ContentView: View {
-    @StateObject private var viewModel = VideoConverterViewModel()
+struct MainView: View {
     @State private var selectedTab = 0
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         TabView(selection: $selectedTab) {
             // Вкладка Конвертация
-            ConversionView(viewModel: viewModel)
+            ConversionView()
                 .tabItem {
                     Label("Конвертация", systemImage: "video.fill")
                 }
                 .tag(0)
 
             // Вкладка Предпросмотр
-            PreviewView(viewModel: viewModel)
+            PreviewView()
                 .tabItem {
                     Label("Предпросмотр", systemImage: "eye.fill")
                 }
                 .tag(1)
 
             // Вкладка Настройки
-            SettingsView(viewModel: viewModel)
+            SettingsView()
                 .tabItem {
                     Label("Настройки", systemImage: "gear")
                 }
                 .tag(2)
 
             // Вкладка Логи
-            LogsView(viewModel: viewModel)
+            LogsView()
                 .tabItem {
                     Label("Логи", systemImage: "doc.text")
                 }
@@ -71,5 +71,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    MainView()
 }

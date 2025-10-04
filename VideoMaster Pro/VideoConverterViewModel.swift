@@ -5,12 +5,11 @@
 //  Created by Sergey on 22.09.2025.
 //
 
-import Foundation
+import SwiftUI
 import AVFoundation
 import Combine
-import SwiftUI
 
-class VideoConverterViewModel: ObservableObject {
+final class VideoConverterViewModel: ObservableObject {
     @Published var videoFiles: [VideoFile] = []
     @Published var conversionSettings = ConversionSettings()
     @Published var isConverting = false
@@ -19,19 +18,25 @@ class VideoConverterViewModel: ObservableObject {
     @Published var lastErrorMessage: String?
     @Published var showErrorAlert = false
 
+    static let shared = VideoConverterViewModel()
+    
+    private init() {}
+    
     private var cancellables = Set<AnyCancellable>()
     private var conversionQueue = DispatchQueue(label: "com.videomaster.conversion", qos: .userInitiated)
-    private let logger = Logger()
+    private let logger = Logger.shared
 
     // MARK: - File Management
 
     func addFiles(_ urls: [URL]) {
-        for url in urls {
-            guard isVideoFile(url) else { continue }
-
-            var videoFile = VideoFile(url: url)
-            loadVideoInfo(for: &videoFile)
-            videoFiles.append(videoFile)
+        Task {
+            for url in urls {
+                guard isVideoFile(url) else { continue }
+                
+                var videoFile = VideoFile(url: url)
+                await loadVideoInfo(for: &videoFile)
+                videoFiles.append(videoFile)
+            }
         }
     }
 
@@ -49,7 +54,7 @@ class VideoConverterViewModel: ObservableObject {
         return videoExtensions.contains(url.pathExtension.lowercased())
     }
 
-    private func loadVideoInfo(for videoFile: inout VideoFile) {
+    private func loadVideoInfo(for videoFile: inout VideoFile) async {
         // Load file size
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: videoFile.url.path)
@@ -59,27 +64,76 @@ class VideoConverterViewModel: ObservableObject {
         }
 
         // Try to get info from AVFoundation first (faster for supported formats)
-        let asset = AVAsset(url: videoFile.url)
-        videoFile.duration = CMTimeGetSeconds(asset.duration)
+//        let asset = AVAsset(url: videoFile.url)
+//        let asset = AVURLAsset(url: videoFile.url)
+//        videoFile.duration = CMTimeGetSeconds(asset.duration)
 
-        if let videoTrack = asset.tracks(withMediaType: .video).first {
-            videoFile.resolution = videoTrack.naturalSize
-            videoFile.bitrate = Int(videoTrack.estimatedDataRate)
+        do {
+            videoFile.duration = try await getVideoDuration(videoFile: videoFile.url)
+        } catch {
+            print("Error in getVideoDuration: \(error)")
+        }
+        
+//        if let videoTrack = asset.tracks(withMediaType: .video).first {
+//            videoFile.resolution = videoTrack.naturalSize
+//            videoFile.bitrate = Int(videoTrack.estimatedDataRate)
+//
+//            // Generate thumbnail
+//            let imageGenerator = AVAssetImageGenerator(asset: asset)
+//            imageGenerator.appliesPreferredTrackTransform = true
+//
+//            let time = CMTime(seconds: min(10, CMTimeGetSeconds(asset.duration) / 4), preferredTimescale: 600)
+//            do {
+//                let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+//                videoFile.thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
+//            } catch {
+//                print("Error generating thumbnail with AVFoundation: \(error)")
+//                // Fallback to FFmpeg if needed
+//            }
+//        }
 
-            // Generate thumbnail
-            let imageGenerator = AVAssetImageGenerator(asset: asset)
-            imageGenerator.appliesPreferredTrackTransform = true
-
-            let time = CMTime(seconds: min(10, CMTimeGetSeconds(asset.duration) / 4), preferredTimescale: 600)
+        @MainActor
+        func updateVideoInfo(for asset: AVAsset, videoFile: inout VideoFile) async {
             do {
-                let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
-                videoFile.thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
+                // Загружаем видео-треки
+                let videoTracks = try await asset.loadTracks(withMediaType: .video)
+                
+                if let videoTrack = videoTracks.first {
+                    // Загружаем свойства трека
+                    let naturalSize = try await videoTrack.load(.naturalSize)
+                    let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
+                    let duration = try await asset.load(.duration)
+                    
+                    // Обновляем свойства
+                    await MainActor.run {
+                        videoFile.resolution = naturalSize
+                        videoFile.bitrate = Int(estimatedDataRate)
+                    }
+                    
+                    // Генерируем thumbnail
+                    let imageGenerator = AVAssetImageGenerator(asset: asset)
+                    imageGenerator.appliesPreferredTrackTransform = true
+                    
+                    let time = CMTime(seconds: min(10, CMTimeGetSeconds(duration) / 4), preferredTimescale: 600)
+                    
+                    do {
+//                        let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+                        let cgImage = try await imageGenerator.generateCGImage(at: time)
+                        await MainActor.run {
+                            videoFile.thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
+                        }
+                    } catch {
+                        print("Error generating thumbnail: \(error)")
+                    }
+                }
             } catch {
-                print("Error generating thumbnail with AVFoundation: \(error)")
-                // Fallback to FFmpeg if needed
+                print("Error loading video info: \(error)")
             }
         }
-
+        
+        
+        
+        
         // If AVFoundation failed to get some info, try FFmpeg
         if videoFile.duration == nil || videoFile.resolution == nil {
             let ffmpegInfo = FFmpegService.shared.getVideoInfo(url: videoFile.url)
@@ -186,7 +240,7 @@ class VideoConverterViewModel: ObservableObject {
         logger.log("Начинаем конвертацию файла: \(inputURL.lastPathComponent)", level: .info)
 
         var conversionSuccess = false
-        var errorMessage: String?
+//        var errorMessage: String?
 
         let semaphore = DispatchSemaphore(value: 0)
 
@@ -197,7 +251,7 @@ class VideoConverterViewModel: ObservableObject {
             progressHandler: progressHandler
         ) { success, error in
             conversionSuccess = success
-            errorMessage = error
+//            errorMessage = error
 
             if success {
                 self.logger.log("Конвертация файла \(inputURL.lastPathComponent) завершена успешно", level: .info)
@@ -221,15 +275,69 @@ class VideoConverterViewModel: ObservableObject {
     // MARK: - Logging
 
     func getRecentLogs() -> String {
-        return logger.getRecentLogs()
+        logger.getRecentLogs()
     }
 
     func getLogFileURL() -> URL {
-        return logger.getLogFileURL()
+        logger.getLogFileURL()
     }
 
     func clearError() {
         lastErrorMessage = nil
         showErrorAlert = false
     }
+    
+    
+    private func getVideoDuration(videoFile: URL) async throws -> Double {
+        let asset = AVURLAsset(url: videoFile)
+        let duration = try await asset.load(.duration)
+        return CMTimeGetSeconds(duration)
+    }
+    
+    func generateThumbnailSimple(asset: AVAsset) async -> NSImage? {
+        do {
+            let duration = try await asset.load(.duration)
+            let imageGenerator = AVAssetImageGenerator(asset: asset)
+            imageGenerator.appliesPreferredTrackTransform = true
+    
+            let time = CMTime(seconds: min(10, CMTimeGetSeconds(duration) / 4), preferredTimescale: 600)
+            let cgImage = try await imageGenerator.generateCGImage(at: time)
+    
+            return NSImage(cgImage: cgImage, size: NSSize(width: 200, height: 112))
+        } catch {
+            print("Error: \(error)")
+            return nil
+        }
+    }
+
+    
 }
+
+
+
+
+extension AVAssetImageGenerator {
+    func generateCGImage(at time: CMTime) async throws -> CGImage {
+        return try await withCheckedThrowingContinuation { continuation in
+            self.generateCGImageAsynchronously(for: time) {
+                image,
+                actualTime,
+                error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else if let image = image {
+                    continuation.resume(returning: image)
+                } else {
+                    continuation.resume(
+                        throwing: NSError(
+                            domain: "AVFoundationError",
+                            code: -1,
+                            userInfo: [NSLocalizedDescriptionKey: "Failed to generate image"]
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+

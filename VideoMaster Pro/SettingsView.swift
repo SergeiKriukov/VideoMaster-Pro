@@ -8,8 +8,9 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
     @State private var isShowingOutputFolderPicker = false
+    
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         ScrollView {
@@ -21,22 +22,22 @@ struct SettingsView: View {
                     .padding(.horizontal)
 
                 // Видео настройки
-                VideoSettingsSection(viewModel: viewModel)
+                VideoSettingsSection()
 
                 Divider()
 
                 // Аудио настройки
-                AudioSettingsSection(viewModel: viewModel)
+                AudioSettingsSection()
 
                 Divider()
 
                 // Выходные настройки
-                OutputSettingsSection(viewModel: viewModel, isShowingFolderPicker: $isShowingOutputFolderPicker)
+                OutputSettingsSection(isShowingFolderPicker: $isShowingOutputFolderPicker)
 
                 Divider()
 
                 // Пресеты
-                PresetsSection(viewModel: viewModel)
+                PresetsSection()
 
                 Divider()
 
@@ -59,8 +60,8 @@ struct SettingsView: View {
     }
 }
 
-struct VideoSettingsSection: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
+private struct VideoSettingsSection: View {
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -160,7 +161,7 @@ struct VideoSettingsSection: View {
 }
 
 struct AudioSettingsSection: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -232,9 +233,10 @@ struct AudioSettingsSection: View {
 }
 
 struct OutputSettingsSection: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
     @Binding var isShowingFolderPicker: Bool
-
+    
+    @StateObject private var viewModel = VideoConverterViewModel.shared
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("📁 Выход")
@@ -298,7 +300,7 @@ struct OutputSettingsSection: View {
 }
 
 struct PresetsSection: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -395,27 +397,27 @@ struct SystemSettingsSection: View {
     }
 }
 
-struct SettingRow<Content: View>: View {
+private struct SettingRow<Content: View>: View {
     let label: String
     let content: Content
-
+    
     init(label: String, @ViewBuilder content: () -> Content) {
         self.label = label
         self.content = content()
     }
-
+    
     var body: some View {
         HStack(alignment: .top) {
             Text(label)
                 .frame(width: 120, alignment: .leading)
                 .font(.callout)
                 .foregroundColor(.secondary)
-
+            
             content
         }
     }
 }
 
 #Preview {
-    SettingsView(viewModel: VideoConverterViewModel())
+    SettingsView()
 }

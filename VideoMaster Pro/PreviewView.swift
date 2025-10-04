@@ -9,9 +9,10 @@ import SwiftUI
 import AVKit
 
 struct PreviewView: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
     @State private var selectedFileIndex: Int?
     @State private var isPlaying = false
+    
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var selectedFile: VideoFile? {
         guard let index = selectedFileIndex, index < viewModel.videoFiles.count else { return nil }
@@ -106,7 +107,7 @@ struct PreviewView: View {
                                     InfoRow(label: "Разрешение", value: "\(Int(resolution.width))×\(Int(resolution.height))")
                                 }
 
-                                if let bitrate = file.bitrate {
+                                if file.bitrate != nil {
                                     InfoRow(label: "Битрейт", value: file.formattedBitrate)
                                 }
 
@@ -272,14 +273,14 @@ struct VideoPlayerView: View {
             player?.pause()
             player = nil
         }
-        .onChange(of: isPlaying) { newValue in
-            if newValue {
+        .onChange(of: isPlaying) { _, play in
+            if play {
                 player?.play()
             } else {
                 player?.pause()
             }
         }
-        .onChange(of: url) { _ in
+        .onChange(of: url) {
             // Recreate player when URL changes
             player?.pause()
             setupPlayer()
@@ -293,7 +294,5 @@ struct VideoPlayerView: View {
 
 
 #Preview {
-    let viewModel = VideoConverterViewModel()
-    // Add sample data for preview
-    return PreviewView(viewModel: viewModel)
+    PreviewView()
 }

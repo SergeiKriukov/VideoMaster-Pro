@@ -9,9 +9,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ConversionView: View {
-    @ObservedObject var viewModel: VideoConverterViewModel
     @State private var isShowingFilePicker = false
     @State private var isShowingFolderPicker = false
+    
+    @StateObject private var viewModel = VideoConverterViewModel.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -341,5 +342,5 @@ struct ConversionSettingsView: View {
 }
 
 #Preview {
-    ConversionView(viewModel: VideoConverterViewModel())
+    ConversionView()
 }

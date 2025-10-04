@@ -13,7 +13,7 @@ struct VideoMaster_ProApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainView()
                 .alert("FFmpeg не найден", isPresented: $showFFmpegAlert) {
                     Button("Установить") {
                         openTerminalWithBrewInstall()
