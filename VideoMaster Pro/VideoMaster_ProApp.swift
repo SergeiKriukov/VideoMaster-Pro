@@ -2,7 +2,8 @@
 //  VideoMaster_ProApp.swift
 //  VideoMaster Pro
 //
-//  Created by Sergey on 22.09.2025.
+//  Created by Сергей Крюков, Александр Анишин, Евгений Турчанинов on 22.09.2025.
+//  Email: info@lawlabs.ru
 //
 
 import SwiftUI

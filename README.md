@@ -188,9 +188,11 @@ git push origin feature/amazing-feature
 
 ## 📞 Контакты
 
-- **Автор**: Sergey Kriukov
-- **GitHub**: [@SergeiKriukov](https://github.com/SergeiKriukov)
-- **Email**: Для вопросов используйте GitHub Issues
+- **Авторы**: 
+  - Сергей Крюков - GitHub: [@SergeiKriukov](https://github.com/SergeiKriukov)
+  - Александр Анишин - GitHub: [@aleksanishin](https://github.com/aleksanishin)
+  - Евгений Турчанинов - GitHub: [@EvgenyTur](https://github.com/EvgenyTur)
+- **Email**: info@lawlabs.ru
 
 ---
 
